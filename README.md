@@ -23,8 +23,8 @@ Run everything as root or with sudo for each commands.
 ### Debian / Ubuntu (tested on Debian 13 and works)
 
 ```bash
-apt-get update
-apt-get install -y --no-install-recommends build-essential golang-go libpam0g-dev git
+doas/sudo apt-get update
+doas/sudo apt-get install -y --no-install-recommends build-essential golang-go libpam0g-dev git
 git clone https://github.com/FronttierLabs/Dau-DoasUser.git
 cd Dau-DoasUser
 export CGO_ENABLED=1
@@ -35,7 +35,7 @@ install -m 0600 -o root -g root examples/dau.conf /etc/dau.conf
 printf '#%%PAM-1.0\nauth      include     common-auth\naccount   include     common-account\n' > /etc/pam.d/dau
 chmod 0644 /etc/pam.d/dau
 
-!!OPTIONAL!! 
+!!NEEDED!! 
 cd..
 rm-rf Dau-DoasUser
 ```
@@ -43,7 +43,7 @@ rm-rf Dau-DoasUser
 ### Arch Linux (tested on Cachy Os 99% sure works on base arch)
 
 ```bash
-pacman -Sy --noconfirm base-devel go git
+doas/sudo pacman -Sy --noconfirm base-devel go git
 git clone https://github.com/FronttierLabs/Dau-DoasUser.git
 cd Dau-DoasUser
 export CGO_ENABLED=1
@@ -54,11 +54,31 @@ install -m 0600 -o root -g root examples/dau.conf /etc/dau.conf
 printf '#%%PAM-1.0\nauth      include     system-auth\naccount   include     system-auth\n' > /etc/pam.d/dau
 chmod 0644 /etc/pam.d/dau
 
-!!OPTIONAL!! 
+!!NEEDED!! 
 cd..
 rm-rf Dau-DoasUser
 
 ```
+### Void (tested on Void and works)
+
+```bash
+sudo/doas xbps-install -Sy base-devel go git pam pam-devel
+git clone https://github.com/FronttierLabs/Dau-DoasUser.git
+cd Dau-DoasUser
+export CGO_ENABLED=1
+export CGO_CFLAGS="-O2 -D_FORTIFY_SOURCE=2 -fstack-protector-strong"
+go build -buildmode=pie -o dau -ldflags '-s -w' .
+install -m 4755 -o root -g root ./dau /usr/local/bin/dau
+install -m 0600 -o root -g root examples/dau.conf /etc/dau.conf
+printf '#%%PAM-1.0\nauth      include     system-auth\naccount   include     system-auth\n' > /etc/pam.d/dau
+chmod 0644 /etc/pam.d/dau
+
+!!NEEDED! 
+cd..
+rm-rf Dau-DoasUser
+
+```
+
 
 
 ### Post-install (both distros)
@@ -105,7 +125,3 @@ used Depseek v4 Flash/claude fable5/opus5/qwen3.8MAX for security auditing i use
 
 
 ```
-
-## License
-
-MIT — see `LICENSE`.

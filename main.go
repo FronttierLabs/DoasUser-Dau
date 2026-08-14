@@ -16,7 +16,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const Version = "v1.2.0-kestrel"
+const Version = "v1.2.0-kestrel-patched"
 
 var sysLog *syslog.Writer
 
@@ -32,12 +32,11 @@ func initAudit() {
 func auditLog(tag, msg string) {
 	line := fmt.Sprintf("[%s] %s", tag, msg)
 	if sysLog != nil {
-		_ = sysLog.Info(line) // #nosec G104
+		_ = sysLog.Info(line)
 	}
 	fmt.Fprintf(os.Stderr, "dau-audit: %s\n", line)
 }
 
-//prints for verbose statement - can be removed i just like seeing what my shit does while its being executed
 var verbose bool
 
 func vlogf(format string, a ...any) {
@@ -46,11 +45,17 @@ func vlogf(format string, a ...any) {
 	}
 }
 
+// FIX H1: only root may see verbose output. Unprivileged users must not be
+// able to read the root-only /etc/dau.conf through `dau -v`.
+func gateVerbose(ruid uint32) {
+	verbose = verbose && ruid == 0
+}
+
 func safeUint32(v int) uint32 {
 	if v < 0 || v > 0xFFFFFFFF {
-		fatal("uid/gid %d out of range", v)
+		fatal("uid/gid out of range")
 	}
-	return uint32(v) // #nosec G115 -- range-checked
+	return uint32(v)
 }
 
 func getRealUID() uint32      { return safeUint32(syscall.Getuid()) }
@@ -73,7 +78,6 @@ func getSupplementaryGIDs() []uint32 {
 	return out
 }
 
-//elavates the user privileges to root then drops down - needed
 func dropToUser(uid, gid uint32) error {
 	if err := unix.Setgroups([]int{int(gid)}); err != nil {
 		return fmt.Errorf("setgroups: %w", err)
@@ -100,18 +104,16 @@ func regainRoot() error {
 }
 
 func setTargetCredentials(uid, gid uint32) error {
-	// Groups were already securely set by POSIX initgroups(3)
 	if err := unix.Setresgid(int(gid), int(gid), int(gid)); err != nil {
 		return fmt.Errorf("setresgid(target): %w", err)
 	}
 	if err := unix.Setresuid(int(uid), int(uid), int(uid)); err != nil {
 		return fmt.Errorf("setresuid(target): %w", err)
 	}
-	vlogf("target credentials set uid=%d gid=%d (groups set by initgroups)", uid, gid)
+	vlogf("target credentials set uid=%d gid=%d", uid, gid)
 	return nil
 }
 
-//path needed for dau if removed dau wont execute - needed
 const safePATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 var envTokenRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.@-]*$`)
@@ -138,19 +140,13 @@ func sanitizeEnv(targetUser *user.User) []string {
 	}
 	if t := os.Getenv("TERM"); envValueAllowed(t) {
 		safe["TERM"] = t
-		vlogf("env: forwarding TERM=%q", t)
-	} else {
-		vlogf("env: dropping TERM=%q (not allowlisted)", os.Getenv("TERM"))
 	}
 	for _, k := range []string{"LANG", "LC_ALL"} {
 		if l := os.Getenv(k); envValueAllowed(l) {
 			if _, ok := allowedLocales[l]; ok {
 				safe[k] = l
-				vlogf("env: forwarding %s=%q", k, l)
-				continue
 			}
 		}
-		vlogf("env: dropping %s=%q (not allowlisted)", k, os.Getenv(k))
 	}
 	env := make([]string, 0, len(safe))
 	for k, v := range safe {
@@ -158,7 +154,7 @@ func sanitizeEnv(targetUser *user.User) []string {
 			env = append(env, k+"="+v)
 		}
 	}
-	vlogf("env: final child env = %v", env)
+	vlogf("env: final child env = %q", env)
 	return env
 }
 
@@ -182,19 +178,15 @@ func dirTrustworthy(dir string) bool {
 
 func resolveCommand(cmd string) string {
 	if filepath.IsAbs(cmd) {
-		vlogf("resolve: %q is absolute", cmd)
 		return cmd
 	}
 	for _, dir := range filepath.SplitList(safePATH) {
 		if !dirTrustworthy(dir) {
-			vlogf("resolve: skipping untrusted dir %s", dir)
-			auditLog("PATH_WARN", fmt.Sprintf("untrusted safePATH dir skipped: %s", dir))
 			continue
 		}
 		candidate := filepath.Join(dir, cmd)
 		fi, err := os.Stat(candidate)
 		if err == nil && !fi.IsDir() {
-			vlogf("resolve: %q → %s (dir %s trusted)", cmd, candidate, dir)
 			return candidate
 		}
 	}
@@ -209,19 +201,31 @@ func verifyTrustedBinary(fd int, path string) error {
 	if st.Mode&unix.S_IFMT != unix.S_IFREG {
 		return fmt.Errorf("not a regular file")
 	}
+
+	// FIX M3: scripts would execute the shebang interpreter, which has not
+	// passed the trusted-binary checks. Reject them.
+	var hdr [2]byte
+	n, err := unix.Pread(fd, hdr[:], 0)
+	if err != nil && err != unix.EINTR {
+		return fmt.Errorf("read: %w", err)
+	}
+	if n == 2 && hdr[0] == '#' && hdr[1] == '!' {
+		return fmt.Errorf("scripts are not allowed")
+	}
+
 	if st.Mode&0111 == 0 {
 		return fmt.Errorf("not executable")
 	}
 	if st.Uid != 0 {
-		return fmt.Errorf("not owned by root (uid=%d)", st.Uid)
+		return fmt.Errorf("not owned by root")
 	}
 	if st.Mode&0022 != 0 {
-		return fmt.Errorf("group/other writable (mode=%o)", st.Mode)
+		return fmt.Errorf("group/other writable")
 	}
 	if !dirTrustworthy(filepath.Dir(path)) {
-		return fmt.Errorf("parent directory %q not trusted", filepath.Dir(path))
+		return fmt.Errorf("parent directory not trusted")
 	}
-	vlogf("verifyTrustedBinary: %s ok (root-owned, non-writable, trusted dir)", path)
+	vlogf("verifyTrustedBinary: %s ok", path)
 	return nil
 }
 
@@ -241,8 +245,8 @@ func getUserShell(username string) string {
 
 func usage() {
 	fmt.Fprintf(os.Stderr, `Usage: dau [-v] [-u target_user] [--] command [args…]
-  -v, --verbose   exhaustive trace on stderr (debug only)
-`)
+	-v, --verbose   root-only exhaustive trace on stderr (debug only)
+	`)
 	os.Exit(1)
 }
 
@@ -259,30 +263,30 @@ func parseArgs() cliArgs {
 	for i < len(osArgs) {
 		arg := osArgs[i]
 		switch {
-		case arg == "-version" || arg == "--version":
-			fmt.Printf("dau %s\n", Version)
-			os.Exit(0)
-		case arg == "-v" || arg == "--verbose":
-			verbose = true
-		case arg == "-u" || arg == "--user":
-			i++
-			if i >= len(osArgs) {
+			case arg == "-version" || arg == "--version":
+				fmt.Printf("dau %s\n", Version)
+				os.Exit(0)
+			case arg == "-v" || arg == "--verbose":
+				verbose = true
+			case arg == "-u" || arg == "--user":
+				i++
+				if i >= len(osArgs) {
+					usage()
+				}
+				a.TargetUser = osArgs[i]
+			case strings.HasPrefix(arg, "-u="):
+				a.TargetUser = arg[3:]
+			case arg == "--":
+				i++
+				goto done
+			case strings.HasPrefix(arg, "-") && arg != "-":
 				usage()
-			}
-			a.TargetUser = osArgs[i]
-		case strings.HasPrefix(arg, "-u="):
-			a.TargetUser = arg[3:]
-		case arg == "--":
-			i++
-			goto done
-		case strings.HasPrefix(arg, "-") && arg != "-":
-			usage()
-		default:
-			goto done
+			default:
+				goto done
 		}
 		i++
 	}
-done:
+	done:
 	if i < len(osArgs) {
 		a.Command = osArgs[i]
 		a.Args = osArgs[i:]
@@ -312,12 +316,12 @@ func execveat(dirfd int, path string, argv, envv []string, flags int) error {
 	pb := append([]byte(path), 0)
 	pathPtr := &pb[0]
 	_, _, errno := unix.Syscall6(unix.SYS_EXECVEAT,
-		uintptr(dirfd),
-		uintptr(unsafe.Pointer(pathPtr)),        // #nosec G103
-		uintptr(unsafe.Pointer(&argvPtrs[0])),   // #nosec G103
-		uintptr(unsafe.Pointer(&envPtrs[0])),    // #nosec G103
-		uintptr(flags),
-		0)
+				     uintptr(dirfd),
+				     uintptr(unsafe.Pointer(pathPtr)),
+				     uintptr(unsafe.Pointer(&argvPtrs[0])),
+				     uintptr(unsafe.Pointer(&envPtrs[0])),
+				     uintptr(flags),
+				     0)
 	if errno != 0 {
 		return errno
 	}
@@ -334,26 +338,31 @@ func main() {
 		fatal("dau must be installed setuid-root (euid=%d)", euid)
 	}
 	auditLog("START", fmt.Sprintf("version=%s invoker_uid=%d target=pending", Version, ruid))
-	vlogf("dau %s starting | setuid verified: euid=%d ruid=%d rgid=%d", Version, euid, ruid, getRealGID())
 
 	cli := parseArgs()
+
+	// FIX H1: disable verbose for non-root before policy is read/printed.
+	gateVerbose(ruid)
 	setPamVerbose(verbose)
-	vlogf("args: target=%q cmd=%q args=%v", cli.TargetUser, cli.Command, cli.Args)
+	vlogf("args: target=%q cmd=%q args=%q", cli.TargetUser, cli.Command, cli.Args)
 
 	if !usernameRe.MatchString(cli.TargetUser) {
 		fatal("invalid target username %q", cli.TargetUser)
 	}
 	targetU, err := user.Lookup(cli.TargetUser)
 	if err != nil {
-		fatal("unknown target user %q: %v", cli.TargetUser, err)
+		if ruid == 0 {
+			fatal("unknown target user %q: %v", cli.TargetUser, err)
+		}
+		fatal("unknown target user")
 	}
 	targetUID, err := strconv.ParseUint(targetU.Uid, 10, 32)
 	if err != nil {
-		fatal("malformed target UID %q for user %q (fail closed)", targetU.Uid, cli.TargetUser)
+		fatal("malformed target UID (fail closed)")
 	}
 	targetGID, err := strconv.ParseUint(targetU.Gid, 10, 32)
 	if err != nil {
-		fatal("malformed target GID %q for user %q (fail closed)", targetU.Gid, cli.TargetUser)
+		fatal("malformed target GID (fail closed)")
 	}
 
 	if cli.Command == "" {
@@ -364,60 +373,55 @@ func main() {
 		cmdArgs = cli.Args[1:]
 	}
 
-	resolvedCmd := resolveCommand(cli.Command)
-	if resolvedCmd == "" {
-		fatal("cannot resolve %q via safe PATH", cli.Command)
-	}
-
-	// Resolve symlinks (e.g., /sbin/reboot -> /bin/systemctl) so O_NOFOLLOW
-	// doesn't reject standard system symlinks. Security is maintained because
-	// we verify the directory of the FINAL resolved target is also trusted.
-	realCmd, err := filepath.EvalSymlinks(resolvedCmd)
-	if err != nil {
-		fatal("cannot resolve symlinks for %q: %v", resolvedCmd, err)
-	}
-	if !dirTrustworthy(filepath.Dir(realCmd)) {
-		fatal("resolved target %q lives in untrusted directory", realCmd)
-	}
-
-	// TOCTOU fix: open and verify the REAL binary IMMEDIATELY after resolution.
-	fd, err := unix.Open(realCmd, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-	if err != nil {
-		fatal("open %s: %v", realCmd, err)
-	}
-	vlogf("exec fd=%d opened (O_NOFOLLOW|O_CLOEXEC) for %s -> %s", fd, resolvedCmd, realCmd)
-
-	if err := verifyTrustedBinary(fd, realCmd); err != nil {
-		_ = unix.Close(fd)
-		fatal("refusing to exec untrusted binary %s: %v", realCmd, err)
-	}
-
-	auditLog("PARSE", fmt.Sprintf("invoker_uid=%d target=%s cmd=%s resolved=%s real=%s args=%v",
-		ruid, cli.TargetUser, cli.Command, resolvedCmd, realCmd, cmdArgs))
-
 	cfg := loadConfig()
 	vlogf("policy loaded: %d rule(s)", len(cfg.Rules))
 
 	invokerGIDs := getSupplementaryGIDs()
 	if err := dropToUser(ruid, getRealGID()); err != nil {
-		fatal("drop privileges: %v", err)
+		fatal("drop privileges failed")
 	}
 
-	//cheks user prev
-	rule := cfg.findRule(ruid, invokerGIDs, cli.TargetUser, resolvedCmd, cmdArgs)
+	// FIX H2: resolve and canonicalize as the invoker, not as root.
+	// Root-resolution was an unauthenticated existence/attribute oracle for
+	// root-only paths such as /root/only/*.
+	resolvedCmd := resolveCommand(cli.Command)
+	if resolvedCmd == "" {
+		if ruid == 0 {
+			fatal("cannot resolve %q via safe PATH", cli.Command)
+		}
+		fatal("permission denied")
+	}
+
+	realCmd, err := filepath.EvalSymlinks(resolvedCmd)
+	if err != nil {
+		if ruid == 0 {
+			fatal("cannot resolve symlinks for %q: %v", resolvedCmd, err)
+		}
+		fatal("permission denied")
+	}
+	if !dirTrustworthy(filepath.Dir(realCmd)) {
+		if ruid == 0 {
+			fatal("resolved target %q lives in untrusted directory", realCmd)
+		}
+		fatal("permission denied")
+	}
+
+	// FIX H3: authorize the canonical resolved path before opening the binary
+	// and before any password prompt.
+	rule := cfg.findRule(ruid, invokerGIDs, cli.TargetUser, realCmd, cmdArgs)
 	if rule == nil {
-		auditLog("DENY", fmt.Sprintf("uid=%d target=%s cmd=%s args=%v – no matching rule",
-			ruid, cli.TargetUser, resolvedCmd, cmdArgs))
-		fatal("permission denied: no matching rule for uid %d → %s (%s %v)",
-			ruid, cli.TargetUser, resolvedCmd, cmdArgs)
+		auditLog("DENY", fmt.Sprintf("uid=%d target=%s cmd=%s args=%q – no matching rule",
+					     ruid, cli.TargetUser, realCmd, cmdArgs))
+		fatal("permission denied: no matching rule for uid %d → %s (%s %q)",
+		      ruid, cli.TargetUser, realCmd, cmdArgs)
 	}
 	if rule.Command == "" || rule.Args == argsAny {
-		auditLog("GRANT_UNRESTRICTED", fmt.Sprintf("uid=%d target=%s cmd=%s args=%v",
-			ruid, cli.TargetUser, resolvedCmd, cmdArgs))
+		auditLog("GRANT_UNRESTRICTED", fmt.Sprintf("uid=%d target=%s cmd=%s args=%q",
+							   ruid, cli.TargetUser, realCmd, cmdArgs))
 	}
 
 	if err := regainRoot(); err != nil {
-		fatal("regain root: %v", err)
+		fatal("regain root failed")
 	}
 
 	invokerName := fmt.Sprintf("uid=%d", ruid)
@@ -427,36 +431,46 @@ func main() {
 
 	if !rule.NoPasswd {
 		if err := authenticateUser(invokerName); err != nil {
-			auditLog("AUTH_FAIL", fmt.Sprintf("uid=%d target=%s: %v", ruid, cli.TargetUser, err))
-			time.Sleep(2 * time.Second) // speed-bump; pam_faillock does real lockout
-			fatal("authentication failed: %v", err)
+			auditLog("AUTH_FAIL", fmt.Sprintf("uid=%d target=%s", ruid, cli.TargetUser))
+			time.Sleep(2 * time.Second)
+			fatal("authentication failed")
 		}
 	} else {
 		auditLog("NOPASS", fmt.Sprintf("uid=%d target=%s (nopass rule)", ruid, cli.TargetUser))
 	}
 
+	// FIX H2: only now, after authorization and authentication, open and
+	// verify the binary for execution.
+	fd, err := unix.Open(realCmd, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		fatal("open command failed")
+	}
+	vlogf("exec fd=%d opened (O_NOFOLLOW|O_CLOEXEC) for %s -> %s", fd, resolvedCmd, realCmd)
+
+	if err := verifyTrustedBinary(fd, realCmd); err != nil {
+		_ = unix.Close(fd)
+		fatal("refusing to exec untrusted binary")
+	}
+
 	env := sanitizeEnv(targetU)
 
-	// delegate group resolution to POSIX initgroups(3) It is heavily audited
-	// handles NSS edge cases natively and prevents Go level parsing bugs - needed 'might be temp'
 	if err := initGroups(cli.TargetUser, uint32(targetGID)); err != nil {
-		fatal("initgroups(%q): %v", cli.TargetUser, err)
+		fatal("initgroups(%q) failed", cli.TargetUser)
 	}
 	if err := setTargetCredentials(uint32(targetUID), uint32(targetGID)); err != nil {
-		fatal("set target credentials: %v", err)
+		fatal("set target credentials failed")
 	}
 
-	auditLog("EXEC", fmt.Sprintf("uid=%d → target_uid=%d cmd=%s args=%v binary=%s",
-		ruid, targetUID, resolvedCmd, cmdArgs, realCmd))
+	auditLog("EXEC", fmt.Sprintf("uid=%d → target_uid=%d cmd=%s args=%q binary=%s",
+				     ruid, targetUID, realCmd, cmdArgs, realCmd))
 
 	argv := make([]string, len(cli.Args))
 	copy(argv, cli.Args)
-	argv[0] = cli.Command // preserve the user-invoked name as argv[0]
-	vlogf("execveat argv=%v", argv)
+	argv[0] = cli.Command
+	vlogf("execveat argv=%q", argv)
 
-	// fd-based exec only no path-based fallback - due to couple security exploits
 	if err := execveat(fd, "", argv, env, unix.AT_EMPTY_PATH); err != nil {
-		fatal("execveat %s: %v (no fallback by design)", resolvedCmd, err)
+		fatal("execveat failed")
 	}
 }
 

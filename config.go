@@ -77,9 +77,9 @@ func loadConfig() *Config {
 		vlogf("config: line %d parsed → nopass=%v identity=%s target=%s cmd=%q args=%v spec=%v",
 			lineNo, rule.NoPasswd, rule.Identity, rule.Target, rule.Command, rule.Args, rule.ArgSpec)
 		if rule.Command == "" || rule.Args == argsAny {
-			auditLog("POLICY_WARN", fmt.Sprintf(
-				"line %d: unrestricted rule (identity=%s target=%s cmd=%q args=%v)",
-				lineNo, rule.Identity, rule.Target, rule.Command, rule.Args))
+			auditLog("POLICY_WARN", fmt.Sprintf("line %d: unrestricted rule", lineNo))
+			vlogf("config: unrestricted rule detail identity=%s target=%s cmd=%q args=%v",
+			      rule.Identity, rule.Target, rule.Command, rule.Args)
 		}
 		cfg.Rules = append(cfg.Rules, rule)
 	}
