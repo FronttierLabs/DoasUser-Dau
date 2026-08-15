@@ -44,7 +44,11 @@ rm-rf Dau-DoasUser
 
 Requirements: `curl`, `make`, a C compiler (`gcc`), and Git's build deps.
 
-## TINY CORE SPECIFIC DO # tce-load -wi compiletc curl zlib-dev openssl-dev pam pam-dev
+### TinyCore
+
+```bash
+tce-load -wi compiletc curl zlib-dev openssl-dev pam pam-dev
+```
 
 ```bash
 cd /tmp
@@ -56,6 +60,8 @@ cd git-2.49.0
 make -j"$(nproc)" prefix=/usr/local all
     make prefix=/usr/local install
 
+
+git clone https://github.com/FronttierLabs/Dau-DoasUser.git    
 cd Dau-DoasUser
 export CGO_ENABLED=1
 export CGO_CFLAGS="-O2 -D_FORTIFY_SOURCE=2 -fstack-protector-strong"
@@ -66,8 +72,8 @@ printf '#%%PAM-1.0\nauth      include     system-auth\naccount   include     sys
 chmod 0644 /etc/pam.d/dau
 
 !!NEEDED!! 
-cd..
-rm-rf Dau-DoasUser
+cd ..
+rm -rf Dau-DoasUser
 
 ```
 
@@ -89,8 +95,8 @@ printf '#%%PAM-1.0\nauth      include     system-auth\naccount   include     sys
 chmod 0644 /etc/pam.d/dau
 
 !!NEEDED!! 
-cd..
-rm-rf Dau-DoasUser
+cd ..
+rm -rf Dau-DoasUser
 
 ```
 ### Void (tested on Void and works)
@@ -108,8 +114,8 @@ printf '#%%PAM-1.0\nauth      include     system-auth\naccount   include     sys
 chmod 0644 /etc/pam.d/dau
 
 !!NEEDED! 
-cd..
-rm-rf Dau-DoasUser
+cd ..
+rm -rf Dau-DoasUser
 
 ```
 
@@ -153,9 +159,10 @@ permit carol as root cmd /usr/bin/less args any         # explicit opt-in
 - The policy file is read as root by design (it is 0600 root:root).
 
 ## SOME USE OF AI Models where used in the creation of DAU/DoasUser
-```bash
+
 used Depseek v4 Flash/claude fable5/opus5/qwen3.8MAX for security auditing i used some of the AI advice to fix the security issues and not ask them for fixes
-!!!YES I MOSTLY USED AI TO GENERATE THE README!!!
+
+AI assistance: portions of this README were drafted with AI and reviewed by the maintainer.
 
 
 ```
