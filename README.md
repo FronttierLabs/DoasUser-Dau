@@ -123,7 +123,7 @@ rm -rf Dau-DoasUser
 
 
 
-### Post-install (both distros)
+### Post-install
 
 - Edit `/etc/dau.conf` to your policy. It must stay `0600 root:root` or `dau` refuses to read it.
   - Arch: `permit @wheel as root` (wheel exists)
