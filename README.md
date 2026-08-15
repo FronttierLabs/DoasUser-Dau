@@ -166,5 +166,3 @@ used Depseek v4 Flash/claude fable5/opus5/qwen3.8MAX for security auditing i use
 
 AI assistance: portions of this README were drafted with AI and reviewed by the maintainer.
 
-
-```
