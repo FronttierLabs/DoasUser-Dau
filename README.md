@@ -45,7 +45,6 @@ rm-rf Dau-DoasUser
 Requirements: `curl`, `make`, a C compiler (`gcc`), and Git's build deps.
 
 ## TINY CORE SPECIFIC DO # tce-load -wi compiletc curl zlib-dev openssl-dev 
-tce-load -wi compiletc curl zlib-dev openssl-dev
 
 ```bash
 cd /tmp
