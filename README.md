@@ -40,6 +40,41 @@ cd..
 rm-rf Dau-DoasUser
 ```
 
+### Generic distros (LFS, TinyCore, ...)
+
+Requirements: `curl`, `make`, a C compiler (`gcc`), and Git's build deps.
+
+IF ON TINY CORE YOU MUST HAVE A C compiler to obviously compile git 
+
+## TINY CORE SPECIFIC DO # tce-load -wi compiletc curl zlib-dev openssl-dev 
+#then the rest
+
+```bash
+cd /tmp
+
+curl -LO https://www.kernel.org/pub/software/scm/git/git-2.49.0.tar.xz
+cd git-2.49.0
+make prefix=/usr/local
+make prefix=/usr/local install
+
+cd Dau-DoasUser
+export CGO_ENABLED=1
+export CGO_CFLAGS="-O2 -D_FORTIFY_SOURCE=2 -fstack-protector-strong"
+go build -buildmode=pie -o dau -ldflags '-s -w' .
+install -m 4755 -o root -g root ./dau /usr/local/bin/dau
+install -m 0600 -o root -g root examples/dau.conf /etc/dau.conf
+printf '#%%PAM-1.0\nauth      include     system-auth\naccount   include     system-auth\n' > /etc/pam.d/dau
+chmod 0644 /etc/pam.d/dau
+
+!!NEEDED!! 
+cd..
+rm-rf Dau-DoasUser
+
+```
+
+
+
+
 ### Arch Linux (tested on Cachy Os 99% sure works on base arch)
 
 ```bash
