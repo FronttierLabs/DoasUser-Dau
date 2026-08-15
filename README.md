@@ -50,6 +50,8 @@ Requirements: `curl`, `make`, a C compiler (`gcc`), and Git's build deps.
 tce-load -wi compiletc curl zlib-dev openssl-dev pam pam-dev
 ```
 
+### TinyCore/LFS
+
 ```bash
 cd /tmp
 
