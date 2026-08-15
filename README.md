@@ -44,18 +44,18 @@ rm-rf Dau-DoasUser
 
 Requirements: `curl`, `make`, a C compiler (`gcc`), and Git's build deps.
 
-IF ON TINY CORE YOU MUST HAVE A C compiler to obviously compile git 
-
 ## TINY CORE SPECIFIC DO # tce-load -wi compiletc curl zlib-dev openssl-dev 
-#then the rest
+tce-load -wi compiletc curl zlib-dev openssl-dev
 
 ```bash
 cd /tmp
 
 curl -LO https://www.kernel.org/pub/software/scm/git/git-2.49.0.tar.xz
+
+tar -xf git-2.49.0.tar.xz
 cd git-2.49.0
-make prefix=/usr/local
-make prefix=/usr/local install
+make -j"$(nproc)" prefix=/usr/local all
+    make prefix=/usr/local install
 
 cd Dau-DoasUser
 export CGO_ENABLED=1
